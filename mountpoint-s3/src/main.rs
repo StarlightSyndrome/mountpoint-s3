@@ -1,4 +1,5 @@
 use std::env;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
@@ -278,6 +279,27 @@ impl ValueEnum for S3PersonalityArg {
 }
 
 impl CliArgs {
+    fn parse() -> Self {
+        let args: Vec<_> = std::env::args_os().collect();
+        if args.len() == 5 && args[3] == "-o" {
+            return Self::process_fstab_args(args);
+        }
+
+        Self::parse_from(args)
+    }
+
+    fn process_fstab_args(mut args: Vec<OsString>) -> Self {
+        let option_string = args.pop().unwrap().into_string().unwrap_or_default();
+        // remove the -o part
+        let _ = args.pop();
+        let mounts3_args = option_string.split("mount-s3-options=").nth(1).unwrap_or_default();
+        for option in mounts3_args.split(',') {
+            args.push(OsString::from(format!("--{}", option)));
+        }
+
+        Self::parse_from(args)
+    }
+
     fn addressing_style(&self) -> AddressingStyle {
         if self.force_path_style {
             AddressingStyle::Path
@@ -838,8 +860,10 @@ fn validate_mount_point(path: impl AsRef<Path>) -> anyhow::Result<()> {
             }
         };
 
-        if mounts.iter().any(|mount| mount.mount_point == path.as_ref()) {
-            return Err(anyhow!("mount point {} is already mounted", path.as_ref().display()));
+        for mount in mounts {
+            if mount.mount_point == path.as_ref() && mount.fs_type != "autofs" {
+                return Err(anyhow!("mount point {} is already mounted", path.as_ref().display()));
+            }
         }
     }
 
